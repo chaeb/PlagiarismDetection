@@ -5,15 +5,19 @@ from parrot import Parrot
 import torch
 import warnings
 import numpy as np
-
+import re
 warnings.filterwarnings("ignore")
 
 tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 model = BertModel.from_pretrained("bert-base-uncased")
 
 
-def get_embedding(paragraph):   
-    return model(tokenizer(paragraph, return_tensors="pt", padding=True)['input_ids'])[0].mean(axis=1).detach().numpy()
+def get_embedding(paragraph):
+    paragraph = paragraph.lower()
+    paragraph = re.sub(r"[^a-zA-Z0-9]", " ", paragraph)
+    paragraph = tokenizer.cls_token + ' ' + paragraph + ' ' + tokenizer.sep_token
+    input_ids = tokenizer.encode_plus(paragraph, max_length = 512, pad_to_max_length=True, truncation=True)['input_ids']
+    return model(input_ids)[0].mean(axis=1).detach().numpy()
 
 
 def synonym_replacement(paragraph, rate, num_aug):
@@ -48,6 +52,14 @@ def random_deletion(paragraph, rate, num_aug):
             aug_paragraphs[i] += replaced[i]
     return aug_paragraphs
 
+def mix_eda(paragraph, rate, num_aug):
+    aug_paragraphs = [' ' for i in range(num_aug)]
+    for sentence in paragraph:
+        replaced = eda.eda(sentence, alpha_sr = rate, alpha_ri = rate, alpha_rs = rate, p_rd = rate, num_aug = num_aug, stopwords = False)
+        for i in range(num_aug):
+            aug_paragraphs[i] += replaced[i]
+    return aug_paragraphs
+
 
 '''
 Adequacy: How much the paraphrase retains the meaning of the original sentence?
@@ -71,8 +83,12 @@ def paraphrase(paragraph, diversity = False, adequacy_thres = 0.9, fluency_thres
     aug_paragraphs = [' ' for i in range(num_aug)]
     for sentence in paragraph:
         replaced = parrot.augment(sentence, do_diverse=diversity, adequacy_threshold =adequacy_thres, fluency_threshold=fluency_thres, max_return_phrases = num_aug)
+        while replaced == None:
+            adequacy_thres -= 0.05
+            fluency_thres -= 0.05
+            replaced = parrot.augment(sentence, do_diverse=diversity, adequacy_threshold =adequacy_thres, fluency_threshold=fluency_thres, max_return_phrases = num_aug)
         for i in range(num_aug):
-            aug_paragraphs[i] += replaced[i]['sequence']
+            aug_paragraphs[i] += replaced[i][0]
     return aug_paragraphs
 
 def cosine_similarity(a, b):
